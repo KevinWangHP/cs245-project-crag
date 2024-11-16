@@ -54,7 +54,7 @@ def evaluate_predictions(results, eval_model):
 
     n = len(predictions)
     evaluation_results = {
-        "score": (2 * n_correct + n_miss) / n - 1,
+        "score": (2 * n_correct - n_miss) / n - 1,
         "exact_accuracy": n_correct_exact / n,
         "accuracy": n_correct / n,
         "hallucination": (n - n_correct - n_miss) / n,
@@ -83,9 +83,9 @@ if __name__ == "__main__":
                                  ],
                         )
 
-    parser.add_argument("--llm_name", type=str, default="meta-llama/Llama-3.2-3B-Instruct",
-                        choices=["meta-llama/Llama-3.2-3B-Instruct",
-                                 "google/gemma-2-2b-it",
+    parser.add_argument("--llm_name", type=str, default="../pretrained_model/meta-llama/Llama-3.2-3B-Instruct",
+                        choices=["../pretrained_model/meta-llama/Llama-3.2-3B-Instruct",
+                                 "../pretrained_model/google/gemma-2-2b-it",
                                  # can add more llm models here
                                  ])
     parser.add_argument("--is_server", action="store_true", default=False,

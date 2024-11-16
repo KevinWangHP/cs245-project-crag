@@ -82,33 +82,34 @@ def generate_predictions(dataset_path, model, split):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--dataset_path", type=str, default="example_data/dev_data.jsonl.bz2",
+    parser.add_argument("--dataset_path", type=str, default="data/crag_task_1_dev_v4_release.jsonl.bz2",
                         choices=["example_data/dev_data.jsonl.bz2", # example data
                                  "data/crag_task_1_dev_v4_release.jsonl.bz2", # full data
                                  ])
-    parser.add_argument("--split", type=int, default=-1,
+    parser.add_argument("--split", type=int, default=1,
                         help="The split of the dataset to use. This is only relevant for the full data: "
                              "0 for public validation set, 1 for public test set")
 
-    parser.add_argument("--model_name", type=str, default="vanilla_baseline",
+    parser.add_argument("--model_name", type=str, default="multifeature",
                         choices=["vanilla_baseline",
-                                 "rag_baseline"
+                                 "rag_baseline",
+                                 "multifeature"
                                  # add your model here
                                  ],
                         )
 
-    parser.add_argument("--llm_name", type=str, default="meta-llama/Llama-3.2-3B-Instruct",
-                        choices=["meta-llama/Llama-3.2-3B-Instruct",
-                                 "google/gemma-2-2b-it",
+    parser.add_argument("--llm_name", type=str, default="../pretrained_model/meta-llama/Llama-3.2-3B-Instruct",
+                        choices=["../pretrained_model/meta-llama/Llama-3.2-3B-Instruct",
+                                 "../pretrained_model/google/gemma-2-2b-it",
                                  # can add more llm models here
                                  ])
-    parser.add_argument("--is_server", action="store_true", default=False,
+    parser.add_argument("--is_server", action="store_true", default=True,
                         help="Whether we use vLLM deployed on a server or offline inference.")
     parser.add_argument("--vllm_server", type=str, default="http://localhost:8088/v1",
                         help="URL of the vLLM server if is_server is True. The port number may vary.")
 
     args = parser.parse_args()
-    print(args.is_server)
+    print("Is Server?", args.is_server)
 
     dataset_path = args.dataset_path
     dataset = dataset_path.split("/")[0]
@@ -130,8 +131,9 @@ if __name__ == "__main__":
     elif model_name == "rag_baseline":
         from rag_baseline import RAGModel
         model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server)
-    # elif model_name == "your_model":
-    #     add your model here
+    elif model_name == "multifeature":
+        from rag_multifeature_baseline import RAGModel
+        model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, device="cuda:1")
     else:
         raise ValueError("Model name not recognized.")
 

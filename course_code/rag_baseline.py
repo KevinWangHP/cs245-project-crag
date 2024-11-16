@@ -348,7 +348,6 @@ class RAGModel:
             # Limit the length of references to fit the model's input size.
 
             user_message += f"{references}\n------\n\n"
-            user_message 
             user_message += f"Using only the references listed above, answer the following question: \n"
             user_message += f"Current Time: {query_time}\n"
             user_message += f"Question: {query}\n"
