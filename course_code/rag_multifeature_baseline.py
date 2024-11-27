@@ -16,6 +16,7 @@ from multifeature.bm25_retriever import Bm25Retriever
 from multifeature.faiss_retriever import FaissRetriever
 from multifeature.rerank_model import reRankLLM
 from multifeature.utils import trim_predictions_to_max_token_length
+from blingfire import text_to_sentences_and_offsets
 
 from transformers import (
     AutoModelForCausalLM,
@@ -42,7 +43,7 @@ MAX_CONTEXT_SENTENCE_LENGTH = 1000
 MAX_CONTEXT_REFERENCES_LENGTH = 4000
 
 # Batch size you wish the evaluators will use to call the `batch_generate_answer` function
-AICROWD_SUBMISSION_BATCH_SIZE = 2  # TUNE THIS VARIABLE depending on the number of GPUs you are requesting and the size of your model.
+AICROWD_SUBMISSION_BATCH_SIZE = 1  # TUNE THIS VARIABLE depending on the number of GPUs you are requesting and the size of your model.
 
 # VLLM Parameters
 VLLM_TENSOR_PARALLEL_SIZE = 2  # TUNE THIS VARIABLE depending on the number of GPUs you are requesting and the size of your model.
@@ -70,12 +71,33 @@ class ChunkExtractor:
         Returns:
             Tuple[str, List[str]]: A tuple containing the interaction ID and a list of sentences extracted from the HTML content.
         """
+        # soup = BeautifulSoup(html_source, "lxml")
+        # text = soup.get_text(" ", strip=True)  # Use space as a separator, strip whitespaces
+        #
+        # if not text:
+        #     # Return a list with empty string when no text is extracted
+        #     return interaction_id, [""]
+        #
+        # # Extract offsets of sentences from the text
+        # _, offsets = text_to_sentences_and_offsets(text)
+        #
+        # # Initialize a list to store sentences
+        # chunks = []
+        #
+        # # Iterate through the list of offsets and extract sentences
+        # for start, end in offsets:
+        #     # Extract the sentence and limit its length
+        #     sentence = text[start:end][:MAX_CONTEXT_SENTENCE_LENGTH]
+        #     chunks.append(sentence)
+
+
         # Parse the HTML content using BeautifulSoup
         chunks = []
         extracted_markdown = MainContentExtractor.extract(html_source, include_links=False, output_format="markdown")
         if (extracted_markdown == None):
             soup = BeautifulSoup(html_source, "lxml")
-            text = soup.get_text(" ", strip=True)  # Use space as a separator, strip whitespaces
+            text = soup.get_text(" ", strip=True)
+            # Use space as a separator, strip whitespaces
             if not text:
                 # Return a list with empty string when no text is extracted
                 return interaction_id, [""]
@@ -102,6 +124,7 @@ class ChunkExtractor:
                 else:
                     text_split = extracted_markdown.split("\n\n")
                     chunks.extend(self.SlidingWindow(text_split))
+
         return interaction_id, chunks
 
     def extract_chunks(self, batch_interaction_ids, batch_search_results):
@@ -195,16 +218,16 @@ class RAGModel:
     """
 
     def __init__(self, llm_name="meta-llama/Llama-3.2-3B-Instruct", is_server=False, vllm_server=None, device="cuda"):
-        self.initialize_models(llm_name, is_server, vllm_server)
         self.device = device
+        self.initialize_models(llm_name, is_server, vllm_server)
         self.chunk_extractor = ChunkExtractor()
         self.bm25 = Bm25Retriever()
         self.reranker = reRankLLM(RERANKER_MODEL_PATH, device=self.device)
         self.faiss = FaissRetriever(EMBEDDING_MODEL_PATH)
 
-        self.emb_top_k = 7  # 4
-        self.bm25_top_k = 4  # 2
-        self.rerank_top_k = 6
+        self.emb_top_k = 10  # 4
+        self.bm25_top_k = 10  # 2
+        self.rerank_top_k = NUM_CONTEXT_SENTENCES
         self.max_ctx_sentence_length = 200
 
         self.overlap_length = 200
@@ -248,6 +271,40 @@ class RAGModel:
                 enforce_eager=True
             )
             self.tokenizer = self.llm.get_tokenizer()
+
+        # Load a sentence transformer model optimized for sentence embeddings, using CUDA if available.
+        self.sentence_model = SentenceTransformer(
+            "all-MiniLM-L6-v2",
+            device=torch.device(
+                self.device
+            )
+        )
+
+    def calculate_embeddings(self, sentences):
+        """
+        Compute normalized embeddings for a list of sentences using a sentence encoding model.
+
+        This function leverages multiprocessing to encode the sentences, which can enhance the
+        processing speed on multi-core machines.
+
+        Args:
+            sentences (List[str]): A list of sentences for which embeddings are to be computed.
+
+        Returns:
+            np.ndarray: An array of normalized embeddings for the given sentences.
+
+        """
+        embeddings = self.sentence_model.encode(
+            sentences=sentences,
+            normalize_embeddings=True,
+            batch_size=SENTENTENCE_TRANSFORMER_BATCH_SIZE,
+        )
+        # Note: There is an opportunity to parallelize the embedding generation across 4 GPUs
+        #       but sentence_model.encode_multi_process seems to interefere with Ray
+        #       on the evaluation servers.
+        #       todo: this can also be done in a Ray native approach.
+        #
+        return embeddings
 
     def post_process(self, answer):
         if "i don't know" in answer.lower():
@@ -304,6 +361,12 @@ class RAGModel:
             batch_interaction_ids, batch_search_results
         )
 
+        # Calculate all chunk embeddings
+        chunk_embeddings = self.calculate_embeddings(chunks)
+
+        # Calculate embeddings for queries
+        query_embeddings = self.calculate_embeddings(queries)
+
         # Retrieve top matches for the whole batch
         batch_retrieval_results = []
         for _idx, interaction_id in enumerate(batch_interaction_ids):
@@ -318,18 +381,37 @@ class RAGModel:
             self.faiss.GetvectorStore(relevant_chunks)
             retrieval_emb_ans = self.faiss.GetTopK(query, k=self.emb_top_k, score_threshold=self.sim_threshold)
             retrieval_content_ans = [doc.page_content for doc, score in retrieval_emb_ans]
+
             retrieval_results.extend(retrieval_content_ans)
             self.bm25.init_bm25(relevant_chunks)
             bm25_docs = self.bm25.GetBM25TopK(query, self.bm25_top_k)
             bm25_text = [doc.page_content for doc in bm25_docs]
+
             retrieval_results.extend(bm25_text)
+            # # Identify chunks that belong to this interaction_id
+            # relevant_chunks_mask = chunk_interaction_ids == interaction_id
+            #
+            # # cosine similarity
+            # query_embedding = query_embeddings[_idx]
+            # # Filter out the said chunks and corresponding embeddings
+            # relevant_chunks = chunks[relevant_chunks_mask]
+            # relevant_chunks_embeddings = chunk_embeddings[relevant_chunks_mask]
+            # # Calculate cosine similarity between query and chunk embeddings,
+            # cosine_scores = (relevant_chunks_embeddings * query_embedding).sum(1)
+            # # and retrieve top-N results.
+            # cosine_relevant_content = relevant_chunks[
+            #     (-cosine_scores).argsort()[:NUM_CONTEXT_SENTENCES]
+            # ]
+            # retrieval_results.extend(cosine_relevant_content)
+
             rerank_res = self.reranker.predict(query, list(set(retrieval_results)))[:self.rerank_top_k]
+
             batch_retrieval_results.append(rerank_res)
 
         # Prepare formatted prompts from the LLM
         # formatted_prompts = self.merge_format_prompts(queries, query_times, batch_retrieval_results)
-        # formatted_prompts = self.format_prompts(queries, query_times, batch_retrieval_results)
-        formatted_prompts = self.five_shot_template(queries, query_times, batch_retrieval_results)
+        formatted_prompts = self.format_prompts(queries, query_times, batch_retrieval_results)
+        # formatted_prompts = self.five_shot_template(queries, query_times, batch_retrieval_results)
         # Generate responses via vllm
         if self.is_server:
             response = self.llm_client.chat.completions.create(

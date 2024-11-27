@@ -1,0 +1,40 @@
+{
+    train_files: {
+        // root: 所有数据文件的根目录
+        root: '../html_data/treegen/HtmlRAG-train/',
+        sample_rate: {
+            // key: 数据文件相对路径，支持通配符*，数据格式支持 json 和 jsonl
+            // value: 采样倍率，0.？代表下采样，1代表不采样，>1代表上采样。
+//            "asqa-64k": 0.1,
+            "asqa-32k": 0.1,
+            "asqa-16k": 0.1,
+            "asqa-8k": 0.2,
+            "asqa-4k": 0.3,
+            "asqa-2k": 0.2,
+//            "hotpot-qa-64k": 0.1,
+            "hotpot-qa-32k": 0.1,
+            "hotpot-qa-16k": 0.1,
+            "hotpot-qa-8k": 0.2,
+            "hotpot-qa-4k": 0.3,
+            "hotpot-qa-2k": 0.2,
+//            "nq-64k": 0.1,
+            "nq-32k": 0.1,
+            "nq-16k": 0.1,
+            "nq-8k": 0.2,
+            "nq-4k": 0.3,
+            "nq-2k": 0.2,
+//            "trivia-qa-64k": 0.1,
+            "trivia-qa-32k": 0.1,
+            "trivia-qa-16k": 0.1,
+            "trivia-qa-8k": 0.2,
+            "trivia-qa-4k": 0.3,
+            "trivia-qa-2k": 0.2,
+//            "musique-64k": 0.1,
+            "musique-32k": 0.2,
+            "musique-16k": 0.2,
+            "musique-8k": 0.4,
+            "musique-4k": 0.6,
+            "musique-2k": 0.4,
+        }
+    }
+}

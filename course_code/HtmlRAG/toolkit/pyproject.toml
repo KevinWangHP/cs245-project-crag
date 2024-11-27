@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "htmlrag"
+version = "0.0.4"
+authors = [
+  { name="zstanjj", email="zstanjj@gmail.com" },
+]
+description = "A small toolkit for HTML cleaning and pruning for RAG systems."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "lxml",
+    "httpx-sse",
+    "torch",
+    "pydantic-settings",
+    "bs4",
+    "transformers",
+    "sentence-transformers",
+    "torch",
+    "numpy",
+    "langchain",
+    "langchain-core >= 0.3.0",
+    "langchain-huggingface",
+    "anytree",
+    "langchain-community >= 0.3.0",
+    "faiss-cpu",
+]
+
+[project.urls]
+Homepage = "https://github.com/plageon/HtmlRAG"
+Issues = "https://github.com/plageon/HtmlRAG/issues"
+
+[tool.setuptools.packages.find]
+# All the following settings are optional:
+where = ["."]
+include = ["htmlrag"]
+exclude = ["tests"]
+namespaces = true

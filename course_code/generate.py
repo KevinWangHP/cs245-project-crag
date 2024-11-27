@@ -82,7 +82,7 @@ def generate_predictions(dataset_path, model, split):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--dataset_path", type=str, default="data/crag_task_1_dev_v4_release.jsonl.bz2",
+    parser.add_argument("--dataset_path", type=str, default="example_data/dev_data.jsonl.bz2",
                         choices=["example_data/dev_data.jsonl.bz2", # example data
                                  "data/crag_task_1_dev_v4_release.jsonl.bz2", # full data
                                  ])
@@ -90,10 +90,11 @@ if __name__ == "__main__":
                         help="The split of the dataset to use. This is only relevant for the full data: "
                              "0 for public validation set, 1 for public test set")
 
-    parser.add_argument("--model_name", type=str, default="multifeature",
+    parser.add_argument("--model_name", type=str, default="htmlrag",
                         choices=["vanilla_baseline",
                                  "rag_baseline",
-                                 "multifeature"
+                                 "multifeature",
+                                 "htmlrag"
                                  # add your model here
                                  ],
                         )
@@ -133,6 +134,9 @@ if __name__ == "__main__":
         model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server)
     elif model_name == "multifeature":
         from rag_multifeature_baseline import RAGModel
+        model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, device="cuda:1")
+    elif model_name == "htmlrag":
+        from rag_htmlrag_baseline import RAGModel
         model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, device="cuda:1")
     else:
         raise ValueError("Model name not recognized.")

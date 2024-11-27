@@ -54,7 +54,7 @@ def evaluate_predictions(results, eval_model):
 
     n = len(predictions)
     evaluation_results = {
-        "score": (2 * n_correct - n_miss) / n - 1,
+        "score": (2 * n_correct + n_miss) / n - 1,
         "exact_accuracy": n_correct_exact / n,
         "accuracy": n_correct / n,
         "hallucination": (n - n_correct - n_miss) / n,
@@ -71,14 +71,16 @@ def evaluate_predictions(results, eval_model):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--dataset_path", type=str, default="example_data/dev_data.jsonl.bz2",
+    parser.add_argument("--dataset_path", type=str, default="data/crag_task_1_dev_v4_release.jsonl.bz2",
                         choices=["example_data/dev_data.jsonl.bz2", # example data
                                  "data/crag_task_1_dev_v4_release.jsonl.bz2", # full data
                                  ])
 
-    parser.add_argument("--model_name", type=str, default="vanilla_baseline",
+    parser.add_argument("--model_name", type=str, default="htmlrag",
                         choices=["vanilla_baseline",
-                                 "rag_baseline"
+                                 "rag_baseline",
+                                 "multifeature",
+                                 "htmlrag"
                                  # add your model here
                                  ],
                         )
@@ -88,7 +90,7 @@ if __name__ == "__main__":
                                  "../pretrained_model/google/gemma-2-2b-it",
                                  # can add more llm models here
                                  ])
-    parser.add_argument("--is_server", action="store_true", default=False,
+    parser.add_argument("--is_server", action="store_true", default=True,
                         help="Whether we use vLLM deployed on a server or offline inference.")
     parser.add_argument("--vllm_server", type=str, default="http://localhost:8088/v1",
                         help="URL of the vLLM server if is_server is True. The port number may vary.")
