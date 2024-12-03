@@ -6,7 +6,7 @@ import argparse
 
 from loguru import logger
 from tqdm.auto import tqdm
-
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def load_data_in_batches(dataset_path, batch_size, split=-1):
     """
@@ -71,7 +71,6 @@ def generate_predictions(dataset_path, model, split):
     for batch in tqdm(load_data_in_batches(dataset_path, batch_size, split), desc="Generating predictions"):
         batch_ground_truths = batch.pop("answer")  # Remove answers from batch and store them
         batch_predictions = model.batch_generate_answer(batch)
-
         queries.extend(batch["query"])
         ground_truths.extend(batch_ground_truths)
         predictions.extend(batch_predictions)
@@ -90,11 +89,12 @@ if __name__ == "__main__":
                         help="The split of the dataset to use. This is only relevant for the full data: "
                              "0 for public validation set, 1 for public test set")
 
-    parser.add_argument("--model_name", type=str, default="htmlrag",
+    parser.add_argument("--model_name", type=str, default="multifeature",
                         choices=["vanilla_baseline",
                                  "rag_baseline",
                                  "multifeature",
-                                 "htmlrag"
+                                 "htmlrag",
+                                 "bge_baseline"
                                  # add your model here
                                  ],
                         )
@@ -138,6 +138,12 @@ if __name__ == "__main__":
     elif model_name == "htmlrag":
         from rag_htmlrag_baseline import RAGModel
         model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, device="cuda:1")
+    elif model_name == "bge_baseline":
+        from bge_baseline import RAGModel
+        output_directory = os.path.join("..", "output", dataset, model_name, _llm_name)
+        rerank_model = "bgelargeen"
+        input_file = f"{output_directory}/{rerank_model}-{dataset}.jsonl"
+        model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, input_file=input_file)
     else:
         raise ValueError("Model name not recognized.")
 

@@ -327,7 +327,7 @@ if __name__ == "__main__":
     # Generate predictions
     interaction_id, queries, answers, pruned_html, gen_pruned_html = generate_predictions(dataset_path, model, split, max_context_window_1, max_context_window_2)
 
-    file_path = f"../output/preprocess/htmlrag/{args.dataset_path.split()[0]}/"
+    file_path = f"../output/preprocess/htmlrag/{dataset}/"
     file_name_pruned = f"pruned_html_{max_context_window_1}.json"
     # file_name_gen_pruned = "gen_pruned_html.json"
     os.makedirs(file_path, exist_ok=True)

@@ -17,6 +17,7 @@ from multifeature.faiss_retriever import FaissRetriever
 from multifeature.rerank_model import reRankLLM
 from multifeature.utils import trim_predictions_to_max_token_length
 from blingfire import text_to_sentences_and_offsets
+import json
 
 from transformers import (
     AutoModelForCausalLM,
@@ -31,7 +32,7 @@ from langchain.schema import Document
 from langchain.schema.embeddings import Embeddings
 
 RERANKER_MODEL_PATH = "../pretrained_model/BAAI/bge-reranker-v2-gemma"
-EMBEDDING_MODEL_PATH = "../pretrained_model/Alibaba-NLP/gte-large-en-v15"
+EMBEDDING_MODEL_PATH = "../pretrained_model/BAAI/bge-large-en"
 LLAMA3_MODEL_PATH = "../pretrained_model/meta-llama/Llama-3.2-3B-Instruct"
 #### CONFIG PARAMETERS ---
 
@@ -52,165 +53,6 @@ VLLM_GPU_MEMORY_UTILIZATION = 0.79  # 0.85  # TUNE THIS VARIABLE depending on th
 # Sentence Transformer Parameters
 SENTENTENCE_TRANSFORMER_BATCH_SIZE = 128  # TUNE THIS VARIABLE depending on the size of your embedding model and GPU mem available
 
-
-class ChunkExtractor:
-
-    @ray.remote
-    def _extract_chunks(self, interaction_id, html_source):
-        """
-        Extracts and returns chunks from given HTML source.
-
-        Note: This function is for demonstration purposes only.
-        We are treating an independent sentence as a chunk here,
-        but you could choose to chunk your text more cleverly than this.
-
-        Parameters:
-            interaction_id (str): Interaction ID that this HTML source belongs to.
-            html_source (str): HTML content from which to extract text.
-
-        Returns:
-            Tuple[str, List[str]]: A tuple containing the interaction ID and a list of sentences extracted from the HTML content.
-        """
-        # soup = BeautifulSoup(html_source, "lxml")
-        # text = soup.get_text(" ", strip=True)  # Use space as a separator, strip whitespaces
-        #
-        # if not text:
-        #     # Return a list with empty string when no text is extracted
-        #     return interaction_id, [""]
-        #
-        # # Extract offsets of sentences from the text
-        # _, offsets = text_to_sentences_and_offsets(text)
-        #
-        # # Initialize a list to store sentences
-        # chunks = []
-        #
-        # # Iterate through the list of offsets and extract sentences
-        # for start, end in offsets:
-        #     # Extract the sentence and limit its length
-        #     sentence = text[start:end][:MAX_CONTEXT_SENTENCE_LENGTH]
-        #     chunks.append(sentence)
-
-
-        # Parse the HTML content using BeautifulSoup
-        chunks = []
-        extracted_markdown = MainContentExtractor.extract(html_source, include_links=False, output_format="markdown")
-        if (extracted_markdown == None):
-            soup = BeautifulSoup(html_source, "lxml")
-            text = soup.get_text(" ", strip=True)
-            # Use space as a separator, strip whitespaces
-            if not text:
-                # Return a list with empty string when no text is extracted
-                return interaction_id, [""]
-            if (len(text) < 512):
-                chunks.append(text)
-            else:
-                text_split = text.split("\n\n")
-                chunks.extend(self.SlidingWindow(text_split))
-        else:
-            try:
-                sentences = re.split(r'\#+', extracted_markdown)
-                for txt in sentences:
-                    if (len(txt) < 10):
-                        continue
-                    if (len(txt) > 1000):
-                        text_split = txt.split("\n\n")
-                        chunks.extend(self.SlidingWindow(text_split))
-                    else:
-                        sentence = txt[:MAX_CONTEXT_SENTENCE_LENGTH]
-                        chunks.append(sentence)
-            except:
-                if (len(extracted_markdown) < 512):
-                    chunks.append(extracted_markdown)
-                else:
-                    text_split = extracted_markdown.split("\n\n")
-                    chunks.extend(self.SlidingWindow(text_split))
-
-        return interaction_id, chunks
-
-    def extract_chunks(self, batch_interaction_ids, batch_search_results):
-        """
-        Extracts chunks from given batch search results using parallel processing with Ray.
-
-        Parameters:
-            batch_interaction_ids (List[str]): List of interaction IDs.
-            batch_search_results (List[List[Dict]]): List of search results batches, each containing HTML text.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: A tuple containing an array of chunks and an array of corresponding interaction IDs.
-        """
-        # Setup parallel chunk extraction using ray remote
-        ray_response_refs = [
-            self._extract_chunks.remote(
-                self,
-                interaction_id=batch_interaction_ids[idx],
-                html_source=html_text["page_result"]
-            )
-            for idx, search_results in enumerate(batch_search_results)
-            for html_text in search_results
-        ]
-
-        # Wait until all sentence extractions are complete
-        # and collect chunks for every interaction_id separately
-        chunk_dictionary = defaultdict(list)
-
-        for response_ref in ray_response_refs:
-            interaction_id, _chunks = ray.get(response_ref)  # Blocking call until parallel execution is complete
-            chunk_dictionary[interaction_id].extend(_chunks)
-
-        # Flatten chunks and keep a map of corresponding interaction_ids
-        chunks, chunk_interaction_ids = self._flatten_chunks(chunk_dictionary)
-
-        return chunks, chunk_interaction_ids
-
-    def _flatten_chunks(self, chunk_dictionary):
-        """
-        Flattens the chunk dictionary into separate lists for chunks and their corresponding interaction IDs.
-
-        Parameters:
-            chunk_dictionary (defaultdict): Dictionary with interaction IDs as keys and lists of chunks as values.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: A tuple containing an array of chunks and an array of corresponding interaction IDs.
-        """
-        chunks = []
-        chunk_interaction_ids = []
-
-        for interaction_id, _chunks in chunk_dictionary.items():
-            # De-duplicate chunks within the scope of an interaction ID
-            unique_chunks = list(set(_chunks))
-            chunks.extend(unique_chunks)
-            chunk_interaction_ids.extend([interaction_id] * len(unique_chunks))
-
-        # Convert to numpy arrays for convenient slicing/masking operations later
-        chunks = np.array(chunks)
-        chunk_interaction_ids = np.array(chunk_interaction_ids)
-
-        return chunks, chunk_interaction_ids
-
-    def SlidingWindow(self, sentences, max_len=512):
-        cur = ""
-        idx = 0
-        sentence_tmp = []
-        ans = []
-        for sentence in sentences:
-            if (len(sentence) < max_len):
-                sentence_tmp.append(sentence)
-            else:
-                sentence_split = sentence.split(". ")
-                sentence_tmp.extend(sentence_split)
-
-        while (idx < len(sentence_tmp)):
-
-            sentence = sentence_tmp[idx]
-            idx = idx + 1
-            if (len(cur + sentence) > max_len):
-                ans.append((cur + " " + sentence)[:MAX_CONTEXT_SENTENCE_LENGTH])
-                cur = sentence
-            else:
-                cur = cur + sentence
-        return ans
-
-
 class RAGModel:
     """
     An example RAGModel for the KDDCup 2024 Meta CRAG Challenge
@@ -220,14 +62,19 @@ class RAGModel:
     def __init__(self, llm_name="meta-llama/Llama-3.2-3B-Instruct", is_server=False, vllm_server=None, device="cuda"):
         self.device = device
         self.initialize_models(llm_name, is_server, vllm_server)
-        self.chunk_extractor = ChunkExtractor()
-        self.bm25 = Bm25Retriever()
-        self.reranker = reRankLLM(RERANKER_MODEL_PATH, device=self.device)
-        self.faiss = FaissRetriever(EMBEDDING_MODEL_PATH)
+        self.dataset = "example_data"
+        self.path = f'../output/{self.dataset}/multifeature/Llama-3.2-3B-Instruct/'
+        # self.reranker = FlagLLMReranker(RERANKER_MODEL_PATH, use_fp16=True, device=["cuda:1"])  # Setting use_fp16 to True speeds up computation with a slight performance degradation
+        self.model_tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL_PATH)
+        self.model = AutoModelForCausalLM.from_pretrained(RERANKER_MODEL_PATH)
+        self.retrieval_dict = []
+        with open(self.path + f"bgelargeen-{self.dataset}.jsonl", 'r') as file:
+            self.retrieval_dict.append(json.load(file))
+        with open(self.path + f"bm25-{self.dataset}.jsonl", 'r') as file:
+            self.retrieval_dict.append(json.load(file))
 
-        self.emb_top_k = 10  # 4
-        self.bm25_top_k = 10  # 2
-        self.rerank_top_k = NUM_CONTEXT_SENTENCES
+        self.top_k = [5, 5]
+        self.rerank_top_k = 5
         self.max_ctx_sentence_length = 200
 
         self.overlap_length = 200
@@ -273,38 +120,38 @@ class RAGModel:
             self.tokenizer = self.llm.get_tokenizer()
 
         # Load a sentence transformer model optimized for sentence embeddings, using CUDA if available.
-        self.sentence_model = SentenceTransformer(
-            "all-MiniLM-L6-v2",
-            device=torch.device(
-                self.device
-            )
-        )
+        # self.sentence_model = SentenceTransformer(
+        #     "all-MiniLM-L6-v2",
+        #     device=torch.device(
+        #         self.device
+        #     )
+        # )
 
-    def calculate_embeddings(self, sentences):
-        """
-        Compute normalized embeddings for a list of sentences using a sentence encoding model.
-
-        This function leverages multiprocessing to encode the sentences, which can enhance the
-        processing speed on multi-core machines.
-
-        Args:
-            sentences (List[str]): A list of sentences for which embeddings are to be computed.
-
-        Returns:
-            np.ndarray: An array of normalized embeddings for the given sentences.
-
-        """
-        embeddings = self.sentence_model.encode(
-            sentences=sentences,
-            normalize_embeddings=True,
-            batch_size=SENTENTENCE_TRANSFORMER_BATCH_SIZE,
-        )
-        # Note: There is an opportunity to parallelize the embedding generation across 4 GPUs
-        #       but sentence_model.encode_multi_process seems to interefere with Ray
-        #       on the evaluation servers.
-        #       todo: this can also be done in a Ray native approach.
-        #
-        return embeddings
+    # def calculate_embeddings(self, sentences):
+    #     """
+    #     Compute normalized embeddings for a list of sentences using a sentence encoding model.
+    #
+    #     This function leverages multiprocessing to encode the sentences, which can enhance the
+    #     processing speed on multi-core machines.
+    #
+    #     Args:
+    #         sentences (List[str]): A list of sentences for which embeddings are to be computed.
+    #
+    #     Returns:
+    #         np.ndarray: An array of normalized embeddings for the given sentences.
+    #
+    #     """
+    #     embeddings = self.sentence_model.encode(
+    #         sentences=sentences,
+    #         normalize_embeddings=True,
+    #         batch_size=SENTENTENCE_TRANSFORMER_BATCH_SIZE,
+    #     )
+    #     # Note: There is an opportunity to parallelize the embedding generation across 4 GPUs
+    #     #       but sentence_model.encode_multi_process seems to interefere with Ray
+    #     #       on the evaluation servers.
+    #     #       todo: this can also be done in a Ray native approach.
+    #     #
+    #     return embeddings
 
     def post_process(self, answer):
         if "i don't know" in answer.lower():
@@ -326,6 +173,62 @@ class RAGModel:
         """
         self.batch_size = AICROWD_SUBMISSION_BATCH_SIZE
         return self.batch_size
+
+    def reranking(self, input_pair) -> List[float]:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        def get_inputs(pairs, tokenizer, prompt=None, max_length=1024):
+            if prompt is None:
+                prompt = "Given a query A and a passage B, determine whether the passage contains an answer to the query by providing a prediction of either 'Yes' or 'No'."
+            sep = "\n"
+            prompt_inputs = tokenizer(prompt,
+                                      return_tensors=None,
+                                      add_special_tokens=False)['input_ids']
+            sep_inputs = tokenizer(sep,
+                                   return_tensors=None,
+                                   add_special_tokens=False)['input_ids']
+            inputs = []
+            for query, passage in pairs:
+                query_inputs = tokenizer(f'A: {query}',
+                                         return_tensors=None,
+                                         add_special_tokens=False,
+                                         max_length=max_length * 3 // 4,
+                                         truncation=True)
+                passage_inputs = tokenizer(f'B: {passage}',
+                                           return_tensors=None,
+                                           add_special_tokens=False,
+                                           max_length=max_length,
+                                           truncation=True)
+                item = tokenizer.prepare_for_model(
+                    [tokenizer.bos_token_id] + query_inputs['input_ids'],
+                    sep_inputs + passage_inputs['input_ids'],
+                    truncation='only_second',
+                    max_length=max_length,
+                    padding=False,
+                    return_attention_mask=False,
+                    return_token_type_ids=False,
+                    add_special_tokens=False
+                )
+                item['input_ids'] = item['input_ids'] + sep_inputs + prompt_inputs
+                item['attention_mask'] = [1] * len(item['input_ids'])
+                inputs.append(item)
+            return tokenizer.pad(
+                inputs,
+                padding=True,
+                max_length=max_length + len(sep_inputs) + len(prompt_inputs),
+                pad_to_multiple_of=8,
+                return_tensors='pt',
+            )
+
+
+        yes_loc = self.model_tokenizer('Yes', add_special_tokens=False)['input_ids'][0]
+        self.model.eval()
+
+        with torch.no_grad():
+            inputs = get_inputs(input_pair, self.model_tokenizer)
+            scores = self.model(**inputs, return_dict=True).logits[:, -1, yes_loc].view(-1, ).float()
+        return scores
+
 
     def batch_generate_answer(self, batch: Dict[str, Any]) -> List[str]:
         """
@@ -356,72 +259,41 @@ class RAGModel:
         batch_search_results = batch["search_results"]
         query_times = batch["query_time"]
 
-        # Chunk all search results using ChunkExtractor
-        chunks, chunk_interaction_ids = self.chunk_extractor.extract_chunks(
-            batch_interaction_ids, batch_search_results
-        )
 
-        # Calculate all chunk embeddings
-        chunk_embeddings = self.calculate_embeddings(chunks)
-
-        # Calculate embeddings for queries
-        query_embeddings = self.calculate_embeddings(queries)
-
-        # Retrieve top matches for the whole batch
         batch_retrieval_results = []
         for _idx, interaction_id in enumerate(batch_interaction_ids):
             query = queries[_idx]
             query_time = query_times[_idx]
-
-            relevant_chunks_mask = chunk_interaction_ids == interaction_id
             retrieval_results = []
-            # Filter out the said chunks and corresponding embeddings
-            relevant_chunks = chunks[relevant_chunks_mask]
+            for i in range(len(self.retrieval_dict)):
+                retrieval_results.extend(self.retrieval_dict[i][interaction_id]["page_contents"][:self.top_k[i]])
 
-            self.faiss.GetvectorStore(relevant_chunks)
-            retrieval_emb_ans = self.faiss.GetTopK(query, k=self.emb_top_k, score_threshold=self.sim_threshold)
-            retrieval_content_ans = [doc.page_content for doc, score in retrieval_emb_ans]
+            retrieval_results = list(set(retrieval_results))
+            retrieval_reranking = [[query, retrieval_results[i]] for i in range(len(retrieval_results))]
+            scores = self.reranking(retrieval_reranking)
 
-            retrieval_results.extend(retrieval_content_ans)
-            self.bm25.init_bm25(relevant_chunks)
-            bm25_docs = self.bm25.GetBM25TopK(query, self.bm25_top_k)
-            bm25_text = [doc.page_content for doc in bm25_docs]
-
-            retrieval_results.extend(bm25_text)
-            # # Identify chunks that belong to this interaction_id
-            # relevant_chunks_mask = chunk_interaction_ids == interaction_id
-            #
-            # # cosine similarity
-            # query_embedding = query_embeddings[_idx]
-            # # Filter out the said chunks and corresponding embeddings
-            # relevant_chunks = chunks[relevant_chunks_mask]
-            # relevant_chunks_embeddings = chunk_embeddings[relevant_chunks_mask]
-            # # Calculate cosine similarity between query and chunk embeddings,
-            # cosine_scores = (relevant_chunks_embeddings * query_embedding).sum(1)
-            # # and retrieve top-N results.
-            # cosine_relevant_content = relevant_chunks[
-            #     (-cosine_scores).argsort()[:NUM_CONTEXT_SENTENCES]
-            # ]
-            # retrieval_results.extend(cosine_relevant_content)
-
-            rerank_res = self.reranker.predict(query, list(set(retrieval_results)))[:self.rerank_top_k]
-
+            combined = list(zip(scores, retrieval_results))
+            # Sort by scores in descending order
+            sorted_combined = sorted(combined, key=lambda x: x[0], reverse=True)
+            # Get the top k results
+            top_k = sorted_combined[:self.rerank_top_k]
+            # Separate the top_k into scores and results if needed
+            rerank_res = [item[1] for item in top_k]
             batch_retrieval_results.append(rerank_res)
-
         # Prepare formatted prompts from the LLM
         # formatted_prompts = self.merge_format_prompts(queries, query_times, batch_retrieval_results)
-        formatted_prompts = self.format_prompts(queries, query_times, batch_retrieval_results)
-        # formatted_prompts = self.five_shot_template(queries, query_times, batch_retrieval_results)
+        # formatted_prompts = self.format_prompts(queries, query_times, batch_retrieval_results)
+        formatted_prompts = self.five_shot_template(queries, query_times, batch_retrieval_results)
         # Generate responses via vllm
         if self.is_server:
             response = self.llm_client.chat.completions.create(
                 model=self.llm_name,
                 messages=formatted_prompts[0],
-                n=1,  # Number of output sequences to return for each prompt.
-                top_p=0.9,  # Float that controls the cumulative probability of the top tokens to consider.
+                n=2,  # Number of output sequences to return for each prompt.
+                top_p=0.6,  # Float that controls the cumulative probability of the top tokens to consider.
                 temperature=0.1,  # randomness of the sampling
                 # skip_special_tokens=True,  # Whether to skip special tokens in the output.
-                max_tokens=50,  # Maximum number of tokens to generate per output sequence.
+                max_tokens=300,  # Maximum number of tokens to generate per output sequence.
             )
             answers = [response.choices[0].message.content]
         else:
@@ -445,6 +317,7 @@ class RAGModel:
                 answers.append(trimmed_answer)
 
         return answers
+
 
     def five_shot_template(self, queries, query_times, batch_retrieval_results=[]):
         """

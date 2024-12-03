@@ -66,7 +66,7 @@ def generate_predictions(dataset_path, model, split):
     Returns:
     tuple: A tuple containing lists of queries, ground truths, and predictions.
     """
-    interaction_id, queries, answers, search_results = [], [], [], []
+    interaction_id, query_times, queries, answers, search_results = [], [], [], [], []
     # batch_size = model.get_batch_size()
 
     for batch in tqdm(load_data_in_batches(dataset_path, 1, split), desc="Generating Simplify HTML"):
@@ -74,6 +74,7 @@ def generate_predictions(dataset_path, model, split):
         interaction_id.extend(batch["interaction_id"])
         queries.extend(batch["query"])
         answers.extend(batch["answer"])
+        query_times.extend(batch["query_time"])
         cur_search_results = []
         for search in batch["search_results"][0]:
             html_source = search["page_result"]
@@ -81,13 +82,13 @@ def generate_predictions(dataset_path, model, split):
             html_source = simplify_html(h_soup, keep_attr=True)
             cur_search_results.append(html_source)
         search_results.append(cur_search_results)
-    return interaction_id, queries, answers, search_results
+    return interaction_id, query_times, queries, answers, search_results
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--dataset_path", type=str, default="../example_data/dev_data.jsonl.bz2",
+    parser.add_argument("--dataset_path", type=str, default="../data/crag_task_1_dev_v4_release.jsonl.bz2",
                         choices=["../example_data/dev_data.jsonl.bz2",  # example data
                                  "../data/crag_task_1_dev_v4_release.jsonl.bz2",  # full data
                                  ])
@@ -134,12 +135,13 @@ if __name__ == "__main__":
     model = None
 
     # Generate predictions
-    interaction_id, queries, answers, search_results = generate_predictions(dataset_path, model, split)
+    interaction_id, query_times, queries, answers, search_results = generate_predictions(dataset_path, model, split)
 
     # Combine results into a JSON-serializable structure
     data = [
         {
             "id": interaction_id[i],
+            "query_time": query_times[i],
             "question": queries[i],
             "answers": [answers[i]],
             "search_results": search_results[i]
@@ -147,10 +149,11 @@ if __name__ == "__main__":
         for i in range(len(interaction_id))
     ]
 
+    file_path = "./html_data/kdd_crag/kdd_crag.jsonl"
     # Dump to a JSON file
-    with open("./html_data/kdd_crag/kdd_crag.jsonl", "w", encoding="utf-8") as json_file:
+    with open(file_path, "w", encoding="utf-8") as json_file:
         json.dump(data, json_file, ensure_ascii=False, indent=4)
 
-    print("Results saved to ./html_data/kdd_crag/kdd_crag.jsonl")
+    print(f"Results saved to {file_path}")
 
 

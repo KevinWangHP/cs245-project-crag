@@ -76,11 +76,12 @@ if __name__ == "__main__":
                                  "data/crag_task_1_dev_v4_release.jsonl.bz2", # full data
                                  ])
 
-    parser.add_argument("--model_name", type=str, default="htmlrag",
+    parser.add_argument("--model_name", type=str, default="bge_baseline",
                         choices=["vanilla_baseline",
                                  "rag_baseline",
                                  "multifeature",
-                                 "htmlrag"
+                                 "htmlrag",
+                                 "bge_baseline"
                                  # add your model here
                                  ],
                         )

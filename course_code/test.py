@@ -221,12 +221,12 @@ def query_model(question, html):
     # <p>The Bellagio is a luxury hotel and casino located on the Las Vegas Strip in Paradise, Nevada. It was built in 1998.</p>
     # </html>
     print("*****stop*****")
-    # ckpt_path = "zstanjj/HTML-Pruner-Llama-1B"
-    # if torch.cuda.is_available():
-    #     device = "cuda:1"
-    # else:
-    #     device = "cpu"
-    # gen_embed_pruner = GenHTMLPruner(gen_model=ckpt_path, max_node_words=5, device=device)
+    ckpt_path = "zstanjj/HTML-Pruner-Llama-1B"
+    if torch.cuda.is_available():
+        device = "cuda:1"
+    else:
+        device = "cpu"
+    gen_embed_pruner = GenHTMLPruner(gen_model=ckpt_path, max_node_words=5, device=device)
     # soup = bs4.BeautifulSoup("", 'html.parser')
     # soup.append(bs4.BeautifulSoup(pruned_html, 'html.parser'))
     # res = split_tree(soup, 10)

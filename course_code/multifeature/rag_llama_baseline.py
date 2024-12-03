@@ -306,6 +306,7 @@ class RAGModel:
             retrieval_emb_ans = self.faiss.GetTopK(query, k=self.emb_top_k, score_threshold = self.sim_threshold)
             retrieval_content_ans = [doc.page_content for doc, score in retrieval_emb_ans]
             retrieval_results.extend(retrieval_content_ans)
+
             self.bm25.init_bm25(relevant_chunks)
             bm25_docs = self.bm25.GetBM25TopK(query, self.bm25_top_k)
             bm25_text = [doc.page_content for doc in bm25_docs]
