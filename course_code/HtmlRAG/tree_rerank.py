@@ -122,11 +122,6 @@ if __name__ == "__main__":
         encode_kwargs={'normalize_embeddings': True},
     )
 
-    # embedder = TEIEmbeddings(
-    #     model=args.url,
-    #     huggingfacehub_api_token="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",
-    #     model_kwargs={"truncate": True})
-
     data_file = f"./html_data/{dataset}/{dataset}.jsonl"
     with open(data_file, "r", encoding="utf-8") as json_file:
         data_lines = json.load(json_file)
