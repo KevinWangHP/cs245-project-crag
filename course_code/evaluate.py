@@ -34,6 +34,7 @@ def evaluate_predictions(results, eval_model):
         query = queries[_idx]
         ground_truth = str(ground_truths[_idx]).strip()
         prediction = prediction.strip()
+        # prediction = "invalid question"
 
         ground_truth_lowercase = ground_truth.lower()
         prediction_lowercase = prediction.lower()
@@ -76,19 +77,21 @@ if __name__ == "__main__":
                                  "data/crag_task_1_dev_v4_release.jsonl.bz2", # full data
                                  ])
 
-    parser.add_argument("--model_name", type=str, default="bge_baseline",
+    parser.add_argument("--model_name", type=str, default="db3",
                         choices=["vanilla_baseline",
                                  "rag_baseline",
                                  "multifeature",
                                  "htmlrag",
-                                 "bge_baseline"
+                                 "bge_baseline",
+                                 "db3"
                                  # add your model here
                                  ],
                         )
 
-    parser.add_argument("--llm_name", type=str, default="../pretrained_model/meta-llama/Llama-3.2-3B-Instruct",
+    parser.add_argument("--llm_name", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct",
                         choices=["../pretrained_model/meta-llama/Llama-3.2-3B-Instruct",
                                  "../pretrained_model/google/gemma-2-2b-it",
+                                 "meta-llama/Meta-Llama-3-8B-Instruct"
                                  # can add more llm models here
                                  ])
     parser.add_argument("--is_server", action="store_true", default=True,
@@ -108,7 +111,10 @@ if __name__ == "__main__":
 
     llm_name = args.llm_name
     _llm_name = llm_name.split("/")[-1]
-
+    if llm_name == "meta-llama/Meta-Llama-3-8B-Instruct":
+        _llm_name = "Llama-3-8B-Instruct"
+        llm_name = "/u/hpwang/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3-8B-Instruct/snapshots/5f0b02c75b57c5855da9ae460ce51323ea669d8a/"
+    _llm_name = "Llama-3-8B-Instruct"
     # init evaluation model
     from evaluation_model import EvaluationModel
     eval_model = EvaluationModel(llm_name=llm_name, is_server=args.is_server,
@@ -121,8 +127,10 @@ if __name__ == "__main__":
     if not os.path.exists(output_directory):
         raise FileNotFoundError(f"Output directory {output_directory} does not exist.")
 
+    # output_file = "1000-4k-predictions.json"
+    output_file = "predictions.json"
     # load predictions
-    predictions_file = os.path.join(output_directory, "predictions.json")
+    predictions_file = os.path.join(output_directory, output_file)
     results = json.load(open(predictions_file))
 
     # Evaluate predictions

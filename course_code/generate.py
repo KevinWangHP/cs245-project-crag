@@ -81,7 +81,7 @@ def generate_predictions(dataset_path, model, split):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--dataset_path", type=str, default="example_data/dev_data.jsonl.bz2",
+    parser.add_argument("--dataset_path", type=str, default="data/crag_task_1_dev_v4_release.jsonl.bz2",
                         choices=["example_data/dev_data.jsonl.bz2", # example data
                                  "data/crag_task_1_dev_v4_release.jsonl.bz2", # full data
                                  ])
@@ -89,19 +89,22 @@ if __name__ == "__main__":
                         help="The split of the dataset to use. This is only relevant for the full data: "
                              "0 for public validation set, 1 for public test set")
 
-    parser.add_argument("--model_name", type=str, default="multifeature",
+    parser.add_argument("--model_name", type=str, default="db3",
                         choices=["vanilla_baseline",
                                  "rag_baseline",
                                  "multifeature",
                                  "htmlrag",
-                                 "bge_baseline"
+                                 "bge_baseline",
+                                 "db3"
                                  # add your model here
                                  ],
                         )
 
-    parser.add_argument("--llm_name", type=str, default="../pretrained_model/meta-llama/Llama-3.2-3B-Instruct",
+    parser.add_argument("--llm_name", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct",
                         choices=["../pretrained_model/meta-llama/Llama-3.2-3B-Instruct",
                                  "../pretrained_model/google/gemma-2-2b-it",
+                                 "meta-llama/Meta-Llama-3-8B-Instruct",
+
                                  # can add more llm models here
                                  ])
     parser.add_argument("--is_server", action="store_true", default=True,
@@ -123,8 +126,11 @@ if __name__ == "__main__":
     dataset_path = os.path.join("..", dataset_path)
 
     llm_name = args.llm_name
-    _llm_name = llm_name.split("/")[-1]
-    
+    if "Llama-3-8B-Instruct" in llm_name:
+        _llm_name = "Llama-3-8B-Instruct"
+    else:
+        _llm_name = llm_name.split("/")[-1]
+    output_file = f"predictions.json"
     model_name = args.model_name
     if model_name == "vanilla_baseline":
         from vanilla_baseline import InstructModel
@@ -137,13 +143,21 @@ if __name__ == "__main__":
         model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, device="cuda:1")
     elif model_name == "htmlrag":
         from rag_htmlrag_baseline import RAGModel
-        model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, device="cuda:1")
+        output_directory = os.path.join("..", "output", dataset, model_name, _llm_name)
+        max_node_words = 1000
+        context_window = "4k"
+        input_file = f"{output_directory}/{model_name}-{dataset}-{max_node_words}-{context_window}.jsonl"
+        output_file = f"{max_node_words}-{context_window}-predictions.json"
+        model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, input_file=input_file)
     elif model_name == "bge_baseline":
         from bge_baseline import RAGModel
         output_directory = os.path.join("..", "output", dataset, model_name, _llm_name)
         rerank_model = "bgelargeen"
         input_file = f"{output_directory}/{rerank_model}-{dataset}.jsonl"
         model = RAGModel(llm_name=llm_name, is_server=args.is_server, vllm_server=args.vllm_server, input_file=input_file)
+    elif model_name == "db3":
+        from rag_db3_baseline import RAGModel
+        model = RAGModel(llm_name=llm_name)
     else:
         raise ValueError("Model name not recognized.")
 
@@ -156,4 +170,4 @@ if __name__ == "__main__":
 
     # save predictions
     json.dump({"queries": queries, "ground_truths": ground_truths, "predictions": predictions},
-              open(os.path.join(output_directory, "predictions.json"), "w"), indent=4)
+              open(os.path.join(output_directory, output_file), "w"), indent=4)

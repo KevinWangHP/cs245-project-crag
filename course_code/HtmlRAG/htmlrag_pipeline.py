@@ -106,7 +106,7 @@ def generate_predictions(dataset_path, split):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--dataset_path", type=str, default="../example_data/dev_data.jsonl.bz2",
+    parser.add_argument("--dataset_path", type=str, default="../data/crag_task_1_dev_v4_release.jsonl.bz2",
                         choices=["../example_data/dev_data.jsonl.bz2",  # example data
                                  "../data/crag_task_1_dev_v4_release.jsonl.bz2",  # full data
                                  ])
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda:2")
     parser.add_argument("--context_window", type=str, default="4k")
     parser.add_argument("--chunk_size", type=int, default=1000)
-    parser.add_argument("--max_node_words", type=int, default=200)
+    parser.add_argument("--max_node_words", type=int, default=1000)
     args = parser.parse_args()
     context_window = args.context_window
     model_name = args.model_name
@@ -176,8 +176,8 @@ if __name__ == "__main__":
     rerank_model = "bgelargeen"
     query_instruction_for_retrieval = "Represent this sentence for searching relevant passages: "
 
-    model_name = "../../pretrained_model/BAAI/bge-large-en"
-    tokenizer=AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    rerank_model_name = "../../pretrained_model/BAAI/bge-large-en"
+    tokenizer=AutoTokenizer.from_pretrained(rerank_model_name, trust_remote_code=True)
 
     embedder = HuggingFaceBgeEmbeddings(
         model_name=url,
@@ -192,7 +192,7 @@ if __name__ == "__main__":
 
 
     # with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-    for nidx in tqdm(range(len(data_lines)), total=len(data_lines), desc=f"{dataset}:"):
+    for nidx in tqdm(range(len(data_lines)), total=len(data_lines), desc=f"{dataset} ranking:"):
         htmls = [clean_xml(d) for d in data_lines[nidx][f'search_results']]
         htmls = [h for h in htmls if h.strip()]
         soup = bs4.BeautifulSoup("", 'html.parser')
@@ -295,7 +295,7 @@ if __name__ == "__main__":
     ratio = 2
     max_context_window = int(max_context_window) * 1000  // ratio
     #  remove low prob paths pointed tags
-    loguru.logger.info(f"trimming htmls with context window {context_window}, max node words {max_node_words}")
+    loguru.logger.info(f"trimming htmls with context window {context_window}, max node words {max_node_words // 2}")
     # ckpt_path="/cpfs01/shared/public/guopeidong/models/glm4-9b/glm4-9b-128k-v0701-node2/checkpoint-1554"
     node_tokenizer = AutoTokenizer.from_pretrained(ckpt_path, trust_remote_code=True)
     loguru.logger.info(f"node tokenizer: {node_tokenizer.name_or_path}, chat tokenizer: {chat_tokenizer.name_or_path}")
@@ -310,94 +310,96 @@ if __name__ == "__main__":
     else:
         # model=AutoModelForCausalLM.from_pretrained("../../../huggingface/glm-4-9b-chat-1m",trust_remote_code=True)
         model = AutoModelForSeq2SeqLM.from_pretrained(ckpt_path, trust_remote_code=True, torch_dtype=torch.bfloat16)
-        model.max_node_words = max_node_words
+        model.max_node_words = max_node_words // 2
         device = "cpu"
         model.to(device).eval()
 
 
     def init_shard_model(rank):
         shard_model = AutoModelForSeq2SeqLM.from_pretrained(ckpt_path, trust_remote_code=True, torch_dtype=torch.bfloat16)
-        shard_model.max_node_words = max_node_words
+        shard_model.max_node_words = max_node_words // 2
         shard_model.to(f"cuda:{rank}").eval()
         shard_pool.append(shard_model)
 
 
-    #  copy model to all devices
-    if device == "cuda" and parallel_size > 1:
-        for rank in range(parallel_size):
-            thread = threading.Thread(target=init_shard_model, args=(rank,))
-            thread.start()
-            thread_pool.append(thread)
-        for thread in thread_pool:
-            thread.join()
+    # #  copy model to all devices
+    # if device == "cuda" and parallel_size > 1:
+    #     for rank in range(parallel_size):
+    #         thread = threading.Thread(target=init_shard_model, args=(rank,))
+    #         thread.start()
+    #         thread_pool.append(thread)
+    #     for thread in thread_pool:
+    #         thread.join()
 
-    total_len = len(data_lines)
-    res_lines = [{} for _ in range(total_len)]
-    pbar = tqdm(total=total_len, desc=f"Processing {dataset} {split}")
+    # total_len = len(data_lines)
+    # res_lines = [{} for _ in range(total_len)]
+    # pbar = tqdm(total=total_len, desc=f"Generation Pruning {dataset} {split}")
 
     output_dir = f"../../output/{dataset}/{model_name}/{_llm_name}"
     os.makedirs(output_dir, exist_ok=True)
-    output_file = f"{output_dir}/{model_name}-{dataset}.jsonl"
+    output_file = f"{output_dir}/{model_name}-{dataset}-{max_node_words}-{context_window}.jsonl"
     if not os.path.exists(os.path.dirname(output_file)):
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
 
-    def start_thread(rank):
-        while len(data_lines) > 0:
-            try:
-                idx = total_len - len(data_lines)
-                data_line = data_lines.pop(0)
-                question = data_line['question']
-                coarse_html_trim = data_line["html_trim"]
-                html_res = shard_pool[rank].generate_html_tree(node_tokenizer, [question], [coarse_html_trim])
-                # loguru.logger.info(f"Calculate probs for {len(html_res[0]['path_probs'])} nodes")
-                data_line.pop(f'search_results', None)
+    # def start_thread(rank):
+    #     while len(data_lines) > 0:
+    #         try:
+    #             idx = total_len - len(data_lines)
+    #             data_line = data_lines.pop(0)
+    #             question = data_line['question']
+    #             coarse_html_trim = data_line["html_trim"]
+    #             html_res = shard_pool[rank].generate_html_tree(node_tokenizer, [question], [coarse_html_trim])
+    #             # loguru.logger.info(f"Calculate probs for {len(html_res[0]['path_probs'])} nodes")
+    #             data_line.pop(f'search_results', None)
+    #
+    #             res_lines[idx] = {**data_line, **html_res[0]}
+    #             res_lines[idx]["html_trim"] = trim_html_tree(
+    #                 html=html_res[0]["html"],
+    #                 paths=html_res[0]["paths"],
+    #                 is_leaf=html_res[0]["is_leaf"],
+    #                 node_tree=html_res[0]["node_tree"],
+    #                 chat_tokenizer=chat_tokenizer,
+    #                 node_tokenizer=node_tokenizer,
+    #                 max_context_window=max_context_window,
+    #             )
+    #             res_lines[idx]["coarse_html_trim"] = coarse_html_trim
+    #
+    #
+    #         except Exception as e:
+    #             loguru.logger.error(f"Error in processing line {idx}: {e}")
+    #             traceback.print_exc()
+    #             # print(f"Error in processing line {idx}: {e}")
+    #             #  save the processed data
+    #             with open(output_file, "w") as f:
+    #                 for idx in range(len(res_lines)):
+    #                     #  convert "path_probs" from float32 to string
+    #                     # res_lines[idx]["path_probs"] = [str(prob) for prob in res_lines[idx]["path_probs"]]
+    #                     try:
+    #                         f.write(json.dumps(res_lines[idx], ensure_ascii=False) + "\n")
+    #                     except Exception as e:
+    #                         # loguru.logger.error(f"Error in writing line {idx}: {e}")
+    #                         f.write(json.dumps(res_lines[idx], ensure_ascii=True) + "\n")
+    #         pbar.update(1)
+    #
+    #
+    # for i in range(len(shard_pool)):
+    #     thread = threading.Thread(target=start_thread, args=(i,))
+    #     thread.start()
+    #     thread_pool.append(thread)
+    #
+    # for thread in thread_pool:
+    #     thread.join()
+    #
+    # pbar.close()
 
-                res_lines[idx] = {**data_line, **html_res[0]}
-                res_lines[idx]["html_trim"] = trim_html_tree(
-                    html=html_res[0]["html"],
-                    paths=html_res[0]["paths"],
-                    is_leaf=html_res[0]["is_leaf"],
-                    node_tree=html_res[0]["node_tree"],
-                    chat_tokenizer=chat_tokenizer,
-                    node_tokenizer=node_tokenizer,
-                    max_context_window=max_context_window,
-                )
-
-            except Exception as e:
-                loguru.logger.error(f"Error in processing line {idx}: {e}")
-                traceback.print_exc()
-                # print(f"Error in processing line {idx}: {e}")
-                #  save the processed data
-                with open(output_file, "w") as f:
-                    for idx in range(len(res_lines)):
-                        #  convert "path_probs" from float32 to string
-                        # res_lines[idx]["path_probs"] = [str(prob) for prob in res_lines[idx]["path_probs"]]
-                        try:
-                            f.write(json.dumps(res_lines[idx], ensure_ascii=False) + "\n")
-                        except Exception as e:
-                            # loguru.logger.error(f"Error in writing line {idx}: {e}")
-                            f.write(json.dumps(res_lines[idx], ensure_ascii=True) + "\n")
-            pbar.update(1)
-
-
-    for i in range(len(shard_pool)):
-        thread = threading.Thread(target=start_thread, args=(i,))
-        thread.start()
-        thread_pool.append(thread)
-
-    for thread in thread_pool:
-        thread.join()
-
-    pbar.close()
-
-    with open(output_file, "w") as f:
-        for idx in range(len(res_lines)):
-            #  convert "path_probs" from float32 to string
-            # res_lines[idx]["path_probs"] = [str(prob) for prob in res_lines[idx]["path_probs"]]
-            try:
-                f.write(json.dumps(res_lines[idx], ensure_ascii=False) + "\n")
-            except Exception as e:
-                loguru.logger.error(f"Error in writing line {idx}: {e}")
-                f.write(json.dumps(res_lines[idx], ensure_ascii=True) + "\n")
+    data_dict = {}
+    for l in data_lines:
+        data_dict[l["id"]] = {"question": l["question"],
+                              "query_time": l["query_time"],
+                              # "coarse_html_trim": l["coarse_html_trim"],
+                              "html_trim": l["html_trim"],
+                              }
+    with open(output_file, 'w') as json_file:
+        json.dump(data_dict, json_file, indent=4)
     loguru.logger.info(f"Saved parsed html to {output_file}")
